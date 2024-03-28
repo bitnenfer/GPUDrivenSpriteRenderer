@@ -14,10 +14,6 @@ struct PixelOutput {
 
 PixelOutput main(PixelVertex vtx) {
 	PixelOutput output;
-	if (vtx.color.a == 0) {
-		discard;
-		return output;
-	}
 	float4 color = mainTexture[vtx.textureId].SampleLevel(samplerPoint, vtx.texCoord, 0);
 	if (color.a == 0.0) {
 		discard;
