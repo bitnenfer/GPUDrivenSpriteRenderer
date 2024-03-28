@@ -64,28 +64,30 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID) {
     if (totalProcess < constantData.totalDrawCmds) {
         uint drawCmdIndex = dispatchThreadId.x;
         DrawCommand cmd = drawCommands[drawCmdIndex];
-        float4 image = cmd.image;
-        float2 v0 = transform(image.xy, cmd);
-        float2 v1 = transform(float2(image.x, image.y + image.w), cmd);
-        float2 v2 = transform(float2(image.x + image.z, image.y + image.w), cmd);
-        float2 v3 = transform(float2(image.x + image.z, image.y), cmd);
+        uint color = cmd.color;
+        if (((color >> 24) & 0xFF) > 0) {
+            float4 image = cmd.image;
+            float2 v0 = transform(image.xy, cmd);
+            float2 v1 = transform(float2(image.x, image.y + image.w), cmd);
+            float2 v2 = transform(float2(image.x + image.z, image.y + image.w), cmd);
+            float2 v3 = transform(float2(image.x + image.z, image.y), cmd);
 
-        if (isQuadVisible(v0, v1, v2, v3)) {
-            uint vertexIndex = drawCmdIndex * 4;
-            uint color = cmd.color;
-            uint textureId = cmd.textureId;;
-            spriteVertices[vertexIndex + 0] = createVertex(v0, float2(0, 0), textureId, color);
-            spriteVertices[vertexIndex + 1] = createVertex(v1, float2(0, 1), textureId, color);
-            spriteVertices[vertexIndex + 2] = createVertex(v2, float2(1, 1), textureId, color);
-            spriteVertices[vertexIndex + 3] = createVertex(v3, float2(1, 0), textureId, color);
+            if (isQuadVisible(v0, v1, v2, v3)) {
+                uint vertexIndex = drawCmdIndex * 4;
+                uint textureId = cmd.textureId;;
+                spriteVertices[vertexIndex + 0] = createVertex(v0, float2(0, 0), textureId, color);
+                spriteVertices[vertexIndex + 1] = createVertex(v1, float2(0, 1), textureId, color);
+                spriteVertices[vertexIndex + 2] = createVertex(v2, float2(1, 1), textureId, color);
+                spriteVertices[vertexIndex + 3] = createVertex(v3, float2(1, 0), textureId, color);
 
-            uint indexOffset = drawCmdIndex * 6;
-            spriteIndices[indexOffset + 0] = (vertexIndex + 0);
-            spriteIndices[indexOffset + 1] = (vertexIndex + 1);
-            spriteIndices[indexOffset + 2] = (vertexIndex + 2);
-            spriteIndices[indexOffset + 3] = (vertexIndex + 0);
-            spriteIndices[indexOffset + 4] = (vertexIndex + 2);
-            spriteIndices[indexOffset + 5] = (vertexIndex + 3);
+                uint indexOffset = drawCmdIndex * 6;
+                spriteIndices[indexOffset + 0] = (vertexIndex + 0);
+                spriteIndices[indexOffset + 1] = (vertexIndex + 1);
+                spriteIndices[indexOffset + 2] = (vertexIndex + 2);
+                spriteIndices[indexOffset + 3] = (vertexIndex + 0);
+                spriteIndices[indexOffset + 4] = (vertexIndex + 2);
+                spriteIndices[indexOffset + 5] = (vertexIndex + 3);
+            }
         }
     }
 }
