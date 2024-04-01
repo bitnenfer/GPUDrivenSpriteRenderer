@@ -32,13 +32,13 @@ struct Matrix2D {
     float trotation;
 };
 
-struct MatrixStack {
-    MatrixStack() {
+struct TransformStack {
+    TransformStack() {
         current.init();
         depth = 0;
         memset(matrices, 0, sizeof(matrices));
     }
-    ~MatrixStack() {
+    ~TransformStack() {
     }
     inline void pushMatrix() {
         if (depth < MATRIX_STACK_DEPTH) {

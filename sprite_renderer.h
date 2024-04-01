@@ -7,7 +7,7 @@
 // We can have 1 texture per draw.
 #define MAX_DRAW_COMMANDS 1000000
 #define SPRITE_VERTEX_COUNT 6
-#define THREAD_GROUP_SIZE 64
+#define THREAD_GROUP_SIZE 1024
 #define TEXTURE_ID_OFFSET 5
 
 #define OP_CULL_SPRITES 0
@@ -55,6 +55,13 @@ struct DrawCommand {
     uint32_t textureId;
 };
 
+struct Transform {
+    float x;
+    float y;
+    float scale;
+    float rotation;
+};
+
 struct SpriteRenderer {
     struct IndirectCommand {
         D3D12_DRAW_ARGUMENTS draw;
@@ -90,7 +97,7 @@ private:
     ID3D12PipelineState* gpuSpriteGenPSO;
     ID3D12RootSignature* gpuSpriteRenderRootSignature;
     ID3D12PipelineState* gpuSpriteRenderPSO;
-    MatrixStack matrixStack;
+    TransformStack matrixStack;
     DrawCommand* drawCommands;
     uint32_t drawCommandNum;
     gfx::Image2D** images;

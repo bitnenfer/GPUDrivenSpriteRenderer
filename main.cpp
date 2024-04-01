@@ -34,7 +34,7 @@ struct Point {
 };
 
 //#define SPRITE_COUNT (MAX_DRAW_COMMANDS - 1)
-#define SPRITE_COUNT 500000
+#define SPRITE_COUNT 0
 
 int main() {
 
@@ -84,18 +84,20 @@ int main() {
 
 		gfx::pollEvents();
 
-        if (gfx::mouseX() > gfx::getViewWidth() - 100 * currentScale) {
+        bool btnDown = gfx::mouseDown(gfx::MOUSE_BUTTON_LEFT);
+
+        if (btnDown && gfx::mouseX() > gfx::getViewWidth() - 300) {
             viewAcl[0] = 1000.0f / currentScale;
-        } else if (gfx::mouseX() < 100 * currentScale) {
+        } else if (btnDown && gfx::mouseX() < 300) {
             viewAcl[0] = -1000.0f / currentScale;
         } else {
             viewAcl[0] = 0;
             viewVel[0] *= 0.9f;
         }
 
-        if (gfx::mouseY() > gfx::getViewHeight() - 100 * currentScale) {
+        if (btnDown && gfx::mouseY() > gfx::getViewHeight() - 300) {
             viewAcl[1] = 1000.0f / currentScale;
-        } else if (gfx::mouseY() < 100 * currentScale) {
+        } else if (btnDown && gfx::mouseY() < 300) {
             viewAcl[1] = -1000.0f / currentScale;
         } else {
             viewAcl[1] = 0;
@@ -149,6 +151,7 @@ int main() {
             PerformanceAPI_EndEvent();
         }
 		gfx::present(1);
+        gfx::waitForCurrentFrame();
 
         rotation += 1.0f / 60.0f;
 
@@ -164,8 +167,9 @@ int main() {
         }
     }
 
+    gfx::waitForAllFrames();
+    delete spriteRenderer;
     delete[] points;
 	gfx::destroy();
-    delete spriteRenderer;
     return 0;
 }

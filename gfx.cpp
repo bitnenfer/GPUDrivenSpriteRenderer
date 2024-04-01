@@ -22,6 +22,7 @@
 #pragma comment(lib, "d3dcompiler.lib")
 
 static bool keysDown[512];
+static bool mouseBtnsDown[3];
 static gfx::Renderer renderer = {};
 static void loadPIX() {
     if (GetModuleHandleA("WinPixGpuCapture.dll") == 0) {
@@ -153,6 +154,7 @@ void gfx::init(uint32_t width, uint32_t height) {
     renderer.imageToUploadNum = 0;
 
     memset(keysDown, 0, sizeof(keysDown));
+    memset(mouseBtnsDown, 0, sizeof(mouseBtnsDown));
 
 #if USE_FULLSCREEN
     renderer.windowWidth = GetSystemMetrics(SM_CXSCREEN);
@@ -302,13 +304,26 @@ void gfx::init(uint32_t width, uint32_t height) {
     D3D_ASSERT(renderer.device->CreateDescriptorHeap(&dsvDescriptorHeapDesc, IID_PPV_ARGS(&renderer.dsvDescriptorHeap)), "Failed to create DSV descriptor heap");
     renderer.dsvDescriptorHeap->SetName(L"gfx::dsvDescriptorHeap");
 }
-void gfx::destroy() {
+void gfx::waitForCurrentFrame() {
+    RenderFrame& frame = renderer.frames[renderer.currentFrame];
+    if (frame.fence->GetCompletedValue() != frame.frameWaitValue) {
+        frame.fence->SetEventOnCompletion(frame.frameWaitValue, frame.fenceEvent);
+        WaitForSingleObject(frame.fenceEvent, INFINITE);
+    }
+}
+void gfx::waitForAllFrames() {
     for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
         RenderFrame& frame = renderer.frames[index];
         if (frame.fence->GetCompletedValue() != frame.frameWaitValue) {
             frame.fence->SetEventOnCompletion(frame.frameWaitValue, frame.fenceEvent);
             WaitForSingleObject(frame.fenceEvent, INFINITE);
         }
+    }
+}
+void gfx::destroy() {
+    waitForAllFrames();
+    for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
+        RenderFrame& frame = renderer.frames[index];
         D3D_RELEASE(frame.commandList);
         D3D_RELEASE(frame.commandAllocator);
         D3D_RELEASE(frame.fence);
@@ -369,11 +384,22 @@ void gfx::pollEvents() {
             renderer.mouseY = (float)GET_Y_LPARAM(message.lParam);
             break;
         case WM_LBUTTONDOWN:
+            mouseBtnsDown[0] = true;
+            break;
         case WM_LBUTTONUP:
+            mouseBtnsDown[0] = false;
+            break;
         case WM_RBUTTONDOWN:
+            mouseBtnsDown[2] = true;
+            break;
         case WM_RBUTTONUP:
+            mouseBtnsDown[2] = false;
+            break;
         case WM_MBUTTONDOWN:
+            mouseBtnsDown[1] = true;
+            break;
         case WM_MBUTTONUP:
+            mouseBtnsDown[1] = false;
             break;
         case WM_QUIT:
             renderer.shouldQuit = true;
@@ -395,10 +421,6 @@ ID3D12Device* gfx::getDevice() {
 
 gfx::RenderFrame& gfx::beginFrame() {
     RenderFrame& frame = renderer.frames[renderer.currentFrame];
-    if (frame.fence->GetCompletedValue() != frame.frameWaitValue) {
-        frame.fence->SetEventOnCompletion(frame.frameWaitValue, frame.fenceEvent);
-        WaitForSingleObject(frame.fenceEvent, INFINITE);
-    }
     D3D_ASSERT(frame.commandAllocator->Reset(), "Failed to reset command allocator");
     D3D_ASSERT(frame.commandList->Reset(frame.commandAllocator, nullptr), "Failed to reset command list");
     frame.descriptorAllocator.reset();
@@ -602,6 +624,10 @@ float gfx::mouseX() {
 }
 float gfx::mouseY() {
     return renderer.mouseY;
+}
+
+bool gfx::mouseDown(MouseButton button) {
+    return mouseBtnsDown[(uint32_t)button];
 }
 
 bool gfx::keyDown(KeyCode keyCode) {

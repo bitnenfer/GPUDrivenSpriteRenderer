@@ -139,6 +139,12 @@ namespace gfx {
 		EQUALS = 187
 	};
 
+	enum MouseButton {
+		MOUSE_BUTTON_LEFT = 0,
+		MOUSE_BUTTON_MIDDLE = 1,
+		MOUSE_BUTTON_RIGHT = 2
+	};
+
 	enum BufferType {
 		INDEX_BUFFER,
 		VERTEX_BUFFER,
@@ -328,6 +334,8 @@ namespace gfx {
 	};
 
 	void init(uint32_t width, uint32_t height);
+	void waitForCurrentFrame();
+	void waitForAllFrames();
 	void destroy();
 	void pollEvents();
 	bool shouldQuit();
@@ -347,6 +355,7 @@ namespace gfx {
 	D3D12_GPU_DESCRIPTOR_HANDLE getDepthStencilViewGPUHandle();
 	float mouseX();
 	float mouseY();
+	bool mouseDown(MouseButton button);
 	bool keyDown(KeyCode keyCode);
 	float randomFloat();
 	uint32_t randomUint();
