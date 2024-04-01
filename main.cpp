@@ -34,7 +34,7 @@ struct Point {
 };
 
 //#define SPRITE_COUNT (MAX_DRAW_COMMANDS - 1)
-#define SPRITE_COUNT 0
+#define SPRITE_COUNT 100000
 
 int main() {
 
@@ -70,7 +70,7 @@ int main() {
         }
     }
 
-    float viewPos[2] = { 500.0f * 130.0f / 2.0f, 500.0f * 130.0f / 2.0f };
+    float viewPos[2] = { -400, -400 };//{ 500.0f * 130.0f / 2.0f, 500.0f * 130.0f / 2.0f };
     float viewVel[2] = { 0, 0 };
     float viewAcl[2] = { 0, 0 };
     float rotation = 0.0f;
