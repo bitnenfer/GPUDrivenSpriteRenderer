@@ -14,7 +14,12 @@ struct PixelOutput {
 
 PixelOutput main(PixelVertex vtx) {
 	PixelOutput output;
-	float4 color = mainTexture[vtx.textureId].SampleLevel(samplerPoint, vtx.texCoord, 0);
+	uint textureId = vtx.textureId;
+	if ((textureId >> 12) == 0xfffff) {
+		discard;
+		return output;
+	}
+	float4 color = mainTexture[textureId & 0xfff].SampleLevel(samplerPoint, vtx.texCoord, 0);
 	if (color.a == 0.0) {
 		discard;
 		return output;

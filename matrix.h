@@ -23,7 +23,7 @@ struct Matrix2D {
         trotation += rad;
     }
     inline void scale(float x, float y) {
-        tscale = x;
+        tscale *= x;
     }
 
     float tx;

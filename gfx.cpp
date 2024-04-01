@@ -21,6 +21,7 @@
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
+static bool keysDown[512];
 static gfx::Renderer renderer = {};
 static void loadPIX() {
     if (GetModuleHandleA("WinPixGpuCapture.dll") == 0) {
@@ -151,6 +152,8 @@ void gfx::init(uint32_t width, uint32_t height) {
     renderer.imagesToUpload = (Image2D**)malloc(MAX_DESCRIPTORS * sizeof(Image2D*));
     renderer.imageToUploadNum = 0;
 
+    memset(keysDown, 0, sizeof(keysDown));
+
 #if USE_FULLSCREEN
     renderer.windowWidth = GetSystemMetrics(SM_CXSCREEN);
     renderer.windowHeight = GetSystemMetrics(SM_CXSCREEN);
@@ -210,9 +213,9 @@ void gfx::init(uint32_t width, uint32_t height) {
         WS_EX_LEFT, "WindowClass", "GPU Driven Sprites", windowStyle, CW_USEDEFAULT,
         CW_USEDEFAULT, adjustedWidth, adjustedHeight, nullptr, nullptr,
         GetModuleHandle(nullptr), nullptr);
+    loadPIX();
 
 #if _DEBUG
-    loadPIX();
     D3D_ASSERT(D3D12GetDebugInterface(IID_PPV_ARGS(&renderer.debugInterface)), "Failed to create debug interface");
     renderer.debugInterface->EnableDebugLayer();
     renderer.debugInterface->SetEnableGPUBasedValidation(true);
@@ -327,10 +330,22 @@ void gfx::destroy() {
     D3D_RELEASE(renderer.device);
     D3D_RELEASE(renderer.adapter);
     D3D_RELEASE(renderer.factory);
-#if _DEBUG
-    D3D_RELEASE(renderer.debugInterface);
-#endif
     free(renderer.imagesToUpload);
+
+#if _DEBUG
+    if (renderer.debugInterface) {
+        IDXGIDebug1* dxgiDebug = nullptr;
+        if (DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug)) == S_OK) {
+            dxgiDebug->ReportLiveObjects(
+                DXGI_DEBUG_ALL,
+                DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_SUMMARY |
+                    DXGI_DEBUG_RLO_IGNORE_INTERNAL));
+            dxgiDebug->Release();
+        }
+        D3D_RELEASE(renderer.debugInterface);
+    }
+#endif
+
 }
 
 void gfx::pollEvents() {
@@ -344,8 +359,11 @@ void gfx::pollEvents() {
             if (message.wParam == 27) {
                 renderer.shouldQuit = true;
             }
+            keysDown[(uint8_t)message.wParam] = true;
             break;
         case WM_KEYUP:
+            keysDown[(uint8_t)message.wParam] = false;
+            break;
         case WM_MOUSEMOVE:
             renderer.mouseX = (float)GET_X_LPARAM(message.lParam);
             renderer.mouseY = (float)GET_Y_LPARAM(message.lParam);
@@ -584,6 +602,10 @@ float gfx::mouseX() {
 }
 float gfx::mouseY() {
     return renderer.mouseY;
+}
+
+bool gfx::keyDown(KeyCode keyCode) {
+    return keysDown[(uint32_t)keyCode];
 }
 
 float gfx::randomFloat() {

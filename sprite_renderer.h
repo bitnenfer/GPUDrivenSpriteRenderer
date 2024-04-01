@@ -6,10 +6,13 @@
 
 // We can have 1 texture per draw.
 #define MAX_DRAW_COMMANDS 1000000
-#define SPRITE_VERTEX_COUNT 4
-#define SPRITE_INDEX_COUNT 6
-#define DISPATCH_SIZE 64
-#define TEXTURE_ID_OFFSET 4
+#define SPRITE_VERTEX_COUNT 6
+#define THREAD_GROUP_SIZE 64
+#define TEXTURE_ID_OFFSET 5
+
+#define OP_CULL_SPRITES 0
+#define OP_UPDATE_COMMANDS 1
+#define OP_GENERATE_SPRITES 2
 
 #if _DEBUG
 #define OUTPUT_PATH "x64/Debug/"
@@ -36,6 +39,15 @@ struct SpriteVertex {
     uint32_t textureId;
 };
 
+struct SpriteQuad {
+    SpriteVertex v0;
+    SpriteVertex v1;
+    SpriteVertex v2;
+    SpriteVertex v3;
+    SpriteVertex v4;
+    SpriteVertex v5;
+};
+
 struct DrawCommand {
     float image[4];
     float transform[4];
@@ -44,8 +56,9 @@ struct DrawCommand {
 };
 
 struct SpriteRenderer {
-
-    static constexpr size_t vertexSize = sizeof(float[7]);
+    struct IndirectCommand {
+        D3D12_DRAW_ARGUMENTS draw;
+    };
 
     SpriteRenderer();
     ~SpriteRenderer();
@@ -66,13 +79,17 @@ private:
     gfx::Resource gpuDrawCommands[FRAME_COUNT];
     gfx::Resource gpuUploadBuffer;
     gfx::Resource gpuSpriteVertices;
-    gfx::Resource gpuSpriteIndices;
+    gfx::Resource gpuSpriteVerticesCounter;
+    gfx::Resource gpuVisibleList;
+    gfx::Resource gpuPerLaneOffset;
+    gfx::Resource gpuCounterZero;
+    gfx::Resource gpuIndirectCommandBuffer;
+    gfx::Resource gpuClearIndirectCommandBuffer;
+    ID3D12CommandSignature* gpuDrawCommandSignature;
     ID3D12RootSignature* gpuSpriteGenRootSignature;
     ID3D12PipelineState* gpuSpriteGenPSO;
     ID3D12RootSignature* gpuSpriteRenderRootSignature;
     ID3D12PipelineState* gpuSpriteRenderPSO;
-    gfx::Resource gpuProcessCounter;
-    gfx::Resource gpuCounterZero;
     MatrixStack matrixStack;
     DrawCommand* drawCommands;
     uint32_t drawCommandNum;

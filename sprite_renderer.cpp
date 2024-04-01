@@ -7,11 +7,10 @@ SpriteRenderer::SpriteRenderer() {
     drawCommandNum = 0;
     gpuUploadBuffer = gfx::createBuffer(L"SpriteRenderer::uploadBuffer", bufferSize, gfx::UPLOAD_BUFFER);
     for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
-        gpuDrawCommands[index] = gfx::createBuffer(L"SpriteRenderer::drawCommands", bufferSize, gfx::SHADER_RESOURCE_BUFFER);
+        gpuDrawCommands[index] = gfx::createBuffer(L"SpriteRenderer::drawCommands", bufferSize, gfx::UNORDERED_BUFFER);
     }
     images = (gfx::Image2D**)malloc(MAX_DESCRIPTORS * sizeof(gfx::Image2D*));
     imageNum = 0;
-    gpuProcessCounter = gfx::createBuffer(L"SpriteRenderer::processCounter", sizeof(uint32_t), gfx::UNORDERED_BUFFER, true);
     gpuCounterZero = gfx::createBuffer(L"SpriteRenderer::counterZero", sizeof(uint32_t), gfx::UPLOAD_BUFFER, true);
     buildSpriteGen();
     buildSpriteRender();
@@ -20,18 +19,20 @@ SpriteRenderer::SpriteRenderer() {
 SpriteRenderer::~SpriteRenderer() {
     free(images);
     free(drawCommands);
+    D3D_RELEASE(gpuDrawCommandSignature);
     D3D_RELEASE(gpuCounterZero.resource);
-    D3D_RELEASE(gpuProcessCounter.resource);
     D3D_RELEASE(gpuUploadBuffer.resource);
     for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
         D3D_RELEASE(gpuDrawCommands[index].resource);
     }
+    D3D_RELEASE(gpuClearIndirectCommandBuffer.resource);
+    D3D_RELEASE(gpuIndirectCommandBuffer.resource);
     D3D_RELEASE(gpuSpriteVertices.resource);
-    D3D_RELEASE(gpuSpriteIndices.resource);
     D3D_RELEASE(gpuSpriteRenderRootSignature);
     D3D_RELEASE(gpuSpriteRenderPSO);
     D3D_RELEASE(gpuSpriteGenRootSignature);
     D3D_RELEASE(gpuSpriteGenPSO);
+    D3D_RELEASE(gpuVisibleList.resource);
 }
 
 void SpriteRenderer::buildSpriteRender() {
@@ -131,11 +132,10 @@ void SpriteRenderer::buildSpriteRender() {
 void SpriteRenderer::buildSpriteGen() {
     gfx::RootSignatureDescriptorRange rootSigRanges;
     gfx::RootSignatureBuilder rootSigBuilder;
-    rootSigBuilder.addRootParameterConstant(0, 0, 3, D3D12_SHADER_VISIBILITY_ALL);
+    rootSigBuilder.addRootParameterConstant(0, 0, 4, D3D12_SHADER_VISIBILITY_ALL);
     rootSigBuilder.addRootParameterDescriptorTable(
         rootSigRanges
-        .addRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0)
-        .addRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0, 0),
+        .addRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 5, 0, 0),
         D3D12_SHADER_VISIBILITY_ALL);
 
     gpuSpriteGenRootSignature = rootSigBuilder.build(true);
@@ -150,7 +150,27 @@ void SpriteRenderer::buildSpriteGen() {
     psoDesc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
     gpuSpriteGenPSO = gfx::createComputePipelineState(L"SpriteRenderer::spriteGen_CS", psoDesc);
     gpuSpriteVertices = gfx::createBuffer(L"SpriteRenderer::spriteVertices", MAX_DRAW_COMMANDS * (sizeof(SpriteVertex) * SPRITE_VERTEX_COUNT), gfx::UNORDERED_BUFFER);
-    gpuSpriteIndices = gfx::createBuffer(L"SpriteRenderer::spriteIndices", MAX_DRAW_COMMANDS * (sizeof(uint32_t) * SPRITE_INDEX_COUNT), gfx::UNORDERED_BUFFER);
+
+    D3D12_INDIRECT_ARGUMENT_DESC argumentsDesc[1] = {};
+    argumentsDesc[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+    D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
+    commandSignatureDesc.pArgumentDescs = argumentsDesc;
+    commandSignatureDesc.NumArgumentDescs = sizeof(argumentsDesc) / sizeof(argumentsDesc[0]);
+    commandSignatureDesc.ByteStride = sizeof(IndirectCommand);
+    D3D_ASSERT(gfx::getDevice()->CreateCommandSignature(&commandSignatureDesc, nullptr, IID_PPV_ARGS(&gpuDrawCommandSignature)), "Failed to create command signature");
+    gpuDrawCommandSignature->SetName(L"SpriteRenderer::drawCommandSignature");
+    gpuIndirectCommandBuffer = gfx::createBuffer(L"SpriteRenderer::indirectCommandBuffer", sizeof(IndirectCommand), gfx::UNORDERED_BUFFER, true);
+    gpuClearIndirectCommandBuffer = gfx::createBuffer(L"SpriteRenderer::clearIndirectCommandBuffer", sizeof(IndirectCommand), gfx::UPLOAD_BUFFER, true);
+    void* data = nullptr;
+    D3D_ASSERT(gpuClearIndirectCommandBuffer.resource->Map(0, nullptr, &data), "Failed to map clear indirect draw command buffer");
+    IndirectCommand emptyCommand = {};
+    emptyCommand.draw.InstanceCount = 1;
+    emptyCommand.draw.StartVertexLocation = 6;
+    memcpy(data, &emptyCommand, sizeof(IndirectCommand));
+    gpuClearIndirectCommandBuffer.resource->Unmap(0, nullptr);
+    gpuSpriteVerticesCounter = gfx::createBuffer(L"SpriteRenderer::spriteVertexCounter", sizeof(uint32_t), gfx::UNORDERED_BUFFER, true);
+    gpuVisibleList = gfx::createBuffer(L"SpriteRenderer::spriteCounter", sizeof(uint32_t) * MAX_DRAW_COMMANDS, gfx::UNORDERED_BUFFER, true);
+    gpuPerLaneOffset = gfx::createBuffer(L"SpriteRenderer::spriteCounter", sizeof(uint32_t) * MAX_DRAW_COMMANDS, gfx::UNORDERED_BUFFER, true);
 }
 
 void SpriteRenderer::reset() {
@@ -191,59 +211,71 @@ void SpriteRenderer::flushCommands(gfx::RenderFrame& frame) {
     gpuUploadBuffer.resource->Unmap(0, &writtenRange);
 
     barriers.transition(&gpuDrawCommands[frameIndex], D3D12_RESOURCE_STATE_COPY_DEST);
-    barriers.transition(&gpuProcessCounter, D3D12_RESOURCE_STATE_COPY_DEST);
+    barriers.transition(&gpuIndirectCommandBuffer, D3D12_RESOURCE_STATE_COPY_DEST);
+    barriers.transition(&gpuSpriteVerticesCounter, D3D12_RESOURCE_STATE_COPY_DEST);
+    //barriers.transition(&gpuPerLaneOffset, D3D12_RESOURCE_STATE_COPY_DEST);
     barriers.flush(commandList);
     commandList->CopyBufferRegion(gpuDrawCommands[frameIndex].resource, 0, gpuUploadBuffer.resource, 0, drawCommandNum * sizeof(DrawCommand));
-    commandList->CopyResource(gpuProcessCounter.resource, gpuCounterZero.resource);
-
-    barriers.transition(&gpuDrawCommands[frameIndex], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    barriers.transition(&gpuProcessCounter, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    commandList->CopyResource(gpuSpriteVerticesCounter.resource, gpuCounterZero.resource);
+    //commandList->CopyResource(gpuPerLaneOffset.resource, gpuCounterZero.resource);
+    commandList->CopyResource(gpuIndirectCommandBuffer.resource, gpuClearIndirectCommandBuffer.resource);
+    barriers.transition(&gpuDrawCommands[frameIndex], D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    barriers.transition(&gpuIndirectCommandBuffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    barriers.transition(&gpuSpriteVerticesCounter, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    //barriers.transition(&gpuPerLaneOffset, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     barriers.flush(commandList);
 
     commandList->SetPipelineState(gpuSpriteGenPSO);
     commandList->SetComputeRootSignature(gpuSpriteGenRootSignature);
-    struct { float resolution[2]; uint32_t drawCommandNum; } constantData = { { gfx::getViewWidth(), gfx::getViewHeight() }, drawCommandNum };
-    commandList->SetComputeRoot32BitConstants(0, 3, &constantData, 0);
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.Buffer.FirstElement = 0;
-    srvDesc.Buffer.NumElements = drawCommandNum;
-    srvDesc.Buffer.StructureByteStride = sizeof(DrawCommand);
-    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
-    gfx::getDevice()->CreateShaderResourceView(gpuDrawCommands[frameIndex].resource, &srvDesc, frame.descriptorTable.allocate().cpuHandle);
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format = DXGI_FORMAT_UNKNOWN;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
     uavDesc.Buffer.FirstElement = 0;
     uavDesc.Buffer.CounterOffsetInBytes = 0;
-    uavDesc.Buffer.NumElements = MAX_DRAW_COMMANDS * SPRITE_VERTEX_COUNT;
-    uavDesc.Buffer.StructureByteStride = sizeof(SpriteVertex);
+    uavDesc.Buffer.NumElements = drawCommandNum;
+    uavDesc.Buffer.StructureByteStride = sizeof(DrawCommand);
+    gfx::getDevice()->CreateUnorderedAccessView(gpuDrawCommands[frameIndex].resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
+
+    uavDesc.Buffer.NumElements = MAX_DRAW_COMMANDS;
+    uavDesc.Buffer.StructureByteStride = sizeof(SpriteQuad);
     gfx::getDevice()->CreateUnorderedAccessView(gpuSpriteVertices.resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
 
-    uavDesc.Buffer.NumElements = MAX_DRAW_COMMANDS * SPRITE_INDEX_COUNT;
-    uavDesc.Buffer.StructureByteStride = sizeof(uint32_t);
-    gfx::getDevice()->CreateUnorderedAccessView(gpuSpriteIndices.resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
-
     uavDesc.Buffer.NumElements = 1;
+    uavDesc.Buffer.StructureByteStride = sizeof(IndirectCommand);
+    gfx::getDevice()->CreateUnorderedAccessView(gpuIndirectCommandBuffer.resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
+
+    uavDesc.Buffer.NumElements = MAX_DRAW_COMMANDS;
     uavDesc.Buffer.StructureByteStride = sizeof(uint32_t);
-    gfx::getDevice()->CreateUnorderedAccessView(gpuProcessCounter.resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
+    gfx::getDevice()->CreateUnorderedAccessView(gpuVisibleList.resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
+
+    uavDesc.Buffer.NumElements = MAX_DRAW_COMMANDS;
+    uavDesc.Buffer.StructureByteStride = sizeof(uint32_t);
+    gfx::getDevice()->CreateUnorderedAccessView(gpuPerLaneOffset.resource, nullptr, &uavDesc, frame.descriptorTable.allocate().cpuHandle);
+
+    struct { float resolution[2]; uint32_t drawCommandNum; uint32_t operationId; } constantData = { { gfx::getViewWidth(), gfx::getViewHeight() }, drawCommandNum, OP_CULL_SPRITES };
+    commandList->SetComputeRoot32BitConstants(0, sizeof(constantData) / sizeof(uint32_t), &constantData, 0);
 
     commandList->SetComputeRootDescriptorTable(1, frame.descriptorTable.gpuBaseHandle);
-    uint32_t disapatchSize = 1;
-    if (drawCommandNum / DISPATCH_SIZE > 1) {
-        disapatchSize = (drawCommandNum / DISPATCH_SIZE) + ((drawCommandNum % DISPATCH_SIZE > 0) ? 1 : 0);
-    }
+    uint32_t disapatchSize = (drawCommandNum / THREAD_GROUP_SIZE) + ((drawCommandNum % THREAD_GROUP_SIZE > 0) ? 1 : 0);
     commandList->Dispatch(disapatchSize, 1, 1);
 
+    constantData = { { 1.0f / gfx::getViewWidth(), 1.0f / gfx::getViewHeight() }, drawCommandNum, OP_UPDATE_COMMANDS };
+    commandList->SetComputeRoot32BitConstants(0, sizeof(constantData) / sizeof(uint32_t), &constantData, 0);
+    commandList->Dispatch(disapatchSize, 1, 1);
+
+    //constantData = { { 1.0f / gfx::getViewWidth(), 1.0f / gfx::getViewHeight() }, drawCommandNum, OP_GENERATE_SPRITES };
+    //commandList->SetComputeRoot32BitConstants(0, sizeof(constantData) / sizeof(uint32_t), &constantData, 0);
+    //commandList->Dispatch(disapatchSize, 1, 1);
+
+
+    // Render
     gfx::Resource tempRT = { gfx::getCurrentBackbuffer(), D3D12_RESOURCE_STATE_PRESENT };
     barriers.transition(&tempRT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     barriers.transition(&gpuSpriteVertices, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-    barriers.transition(&gpuSpriteIndices, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+    barriers.transition(&gpuIndirectCommandBuffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
     barriers.flush(commandList);
 
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = gfx::getRenderTargetViewCPUHandle();
@@ -294,22 +326,16 @@ void SpriteRenderer::flushCommands(gfx::RenderFrame& frame) {
     scissor.bottom = (uint32_t)gfx::getViewHeight();
     commandList->RSSetScissorRects(1, &scissor);
 
-    D3D12_INDEX_BUFFER_VIEW indexBufferView{};
-    indexBufferView.BufferLocation = gpuSpriteIndices.resource->GetGPUVirtualAddress();
-    indexBufferView.SizeInBytes = MAX_DRAW_COMMANDS * (sizeof(uint32_t) * SPRITE_INDEX_COUNT);
-    indexBufferView.Format = DXGI_FORMAT_R32_UINT;
-    commandList->IASetIndexBuffer(&indexBufferView);
-
     D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
     vertexBufferView.BufferLocation = gpuSpriteVertices.resource->GetGPUVirtualAddress();
     vertexBufferView.SizeInBytes = MAX_DRAW_COMMANDS * (sizeof(SpriteVertex) * SPRITE_VERTEX_COUNT);
     vertexBufferView.StrideInBytes = sizeof(SpriteVertex);
     commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 
-    commandList->DrawIndexedInstanced(drawCommandNum * 6, 1, 0, 0, 0);
+    commandList->ExecuteIndirect(gpuDrawCommandSignature, 1, gpuIndirectCommandBuffer.resource, 0, nullptr, 0);
+    //commandList->DrawInstanced(drawCommandNum * 6, 1, 0, 0);
 
     barriers.transition(&gpuSpriteVertices, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    barriers.transition(&gpuSpriteIndices, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     barriers.transition(&tempRT, D3D12_RESOURCE_STATE_PRESENT);
     barriers.flush(commandList);
 }
