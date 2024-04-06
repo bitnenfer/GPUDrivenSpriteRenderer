@@ -1,5 +1,7 @@
-#include "gfx.h"
-#include "utils.h"
+#define WIN32_LEAN_AND_MEAN 1
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdarg.h>
 #include <Windows.h>
 #include <Windowsx.h>
 #include <stdint.h>
@@ -16,14 +18,19 @@
 #include <random>
 #include <chrono>
 
+#include "ni.h"
+
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
+#define NI_UTILS_WINDOWS_LOG_MAX_BUFFER_SIZE  4096
+#define NI_UTILS_WINDOWS_LOG_MAX_BUFFER_COUNT 4
+
 static bool keysDown[512];
 static bool mouseBtnsDown[3];
-static gfx::Renderer renderer = {};
+static ni::Renderer renderer = {};
 static void loadPIX() {
     if (GetModuleHandleA("WinPixGpuCapture.dll") == 0) {
 
@@ -68,38 +75,38 @@ static void loadPIX() {
     }
 }
 
-gfx::RootSignatureDescriptorRange& gfx::RootSignatureDescriptorRange::addRange(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t descriptorNum, uint32_t baseShaderRegister, uint32_t registerSpace) {
+ni::RootSignatureDescriptorRange& ni::RootSignatureDescriptorRange::addRange(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t descriptorNum, uint32_t baseShaderRegister, uint32_t registerSpace) {
     D3D12_DESCRIPTOR_RANGE range = {};
     range.RangeType = type;
     range.NumDescriptors = descriptorNum;
     range.BaseShaderRegister = baseShaderRegister;
     range.RegisterSpace = registerSpace;
     range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-    ranges.push_back(range);
+    ranges.add(range);
     return *this;
 }
 
-void gfx::RootSignatureBuilder::addRootParameterDescriptorTable(const D3D12_DESCRIPTOR_RANGE* ranges, uint32_t rangeNum, D3D12_SHADER_VISIBILITY shaderVisibility) {
+void ni::RootSignatureBuilder::addRootParameterDescriptorTable(const D3D12_DESCRIPTOR_RANGE* ranges, uint32_t rangeNum, D3D12_SHADER_VISIBILITY shaderVisibility) {
     D3D12_ROOT_PARAMETER rootParam = {};
     rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParam.DescriptorTable.pDescriptorRanges = ranges;
     rootParam.DescriptorTable.NumDescriptorRanges = rangeNum;
     rootParam.ShaderVisibility = shaderVisibility;
-    rootParameters.push_back(rootParam);
+    rootParameters.add(rootParam);
 }
-void gfx::RootSignatureBuilder::addRootParameterDescriptorTable(const RootSignatureDescriptorRange& ranges, D3D12_SHADER_VISIBILITY shaderVisibility) {
+void ni::RootSignatureBuilder::addRootParameterDescriptorTable(const RootSignatureDescriptorRange& ranges, D3D12_SHADER_VISIBILITY shaderVisibility) {
     addRootParameterDescriptorTable(*ranges, ranges.getNum(), shaderVisibility);
 }
-void gfx::RootSignatureBuilder::addRootParameterConstant(uint32_t shaderRegister, uint32_t registerSpace, uint32_t num32BitValues, D3D12_SHADER_VISIBILITY shaderVisibility) {
+void ni::RootSignatureBuilder::addRootParameterConstant(uint32_t shaderRegister, uint32_t registerSpace, uint32_t num32BitValues, D3D12_SHADER_VISIBILITY shaderVisibility) {
     D3D12_ROOT_PARAMETER rootParam = {};
     rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     rootParam.Constants.ShaderRegister = shaderRegister;
     rootParam.Constants.RegisterSpace = registerSpace;
     rootParam.Constants.Num32BitValues = num32BitValues;
     rootParam.ShaderVisibility = shaderVisibility;
-    rootParameters.push_back(rootParam);
+    rootParameters.add(rootParam);
 }
-void gfx::RootSignatureBuilder::addStaticSampler(D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE addressModeAll, uint32_t shaderRegister, uint32_t registerSpace, D3D12_SHADER_VISIBILITY shaderVisibility) {
+void ni::RootSignatureBuilder::addStaticSampler(D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE addressModeAll, uint32_t shaderRegister, uint32_t registerSpace, D3D12_SHADER_VISIBILITY shaderVisibility) {
     D3D12_STATIC_SAMPLER_DESC staticSampler = {};
     staticSampler.Filter = filter;
     staticSampler.AddressU = addressModeAll;
@@ -114,49 +121,49 @@ void gfx::RootSignatureBuilder::addStaticSampler(D3D12_FILTER filter, D3D12_TEXT
     staticSampler.ShaderRegister = shaderRegister;
     staticSampler.RegisterSpace = registerSpace;
     staticSampler.ShaderVisibility = shaderVisibility;
-    staticSamplers.push_back(staticSampler);
+    staticSamplers.add(staticSampler);
 }
 
-ID3D12RootSignature* gfx::RootSignatureBuilder::build(bool isCompute) {
+ID3D12RootSignature* ni::RootSignatureBuilder::build(bool isCompute) {
     ID3DBlob* rootSignatureBlob = nullptr;
     ID3DBlob* errorBlob = nullptr;
     D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = (uint32_t)rootParameters.size();
-    rootSignatureDesc.pParameters = rootParameters.data();
-    rootSignatureDesc.NumStaticSamplers = (uint32_t)staticSamplers.size();
-    rootSignatureDesc.pStaticSamplers = staticSamplers.data();
+    rootSignatureDesc.NumParameters = rootParameters.getNum();
+    rootSignatureDesc.pParameters = rootParameters.getData();
+    rootSignatureDesc.NumStaticSamplers = staticSamplers.getNum();
+    rootSignatureDesc.pStaticSamplers = staticSamplers.getData();
     rootSignatureDesc.Flags = isCompute ? D3D12_ROOT_SIGNATURE_FLAG_NONE : D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
     if (D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &rootSignatureBlob, &errorBlob) != S_OK) {
-        PANIC("Failed to serialize root signature.\n%s", errorBlob->GetBufferPointer());
+        NI_PANIC("Failed to serialize root signature.\n%s", errorBlob->GetBufferPointer());
     }
     ID3D12RootSignature* rootSignature = nullptr;
-    D3D_ASSERT(renderer.device->CreateRootSignature(0, rootSignatureBlob->GetBufferPointer(), rootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature)), "Failed to create root signature");
+    NI_D3D_ASSERT(renderer.device->CreateRootSignature(0, rootSignatureBlob->GetBufferPointer(), rootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature)), "Failed to create root signature");
     return rootSignature;
 }
 
-void gfx::DescriptorAllocator::reset() {
+void ni::DescriptorAllocator::reset() {
     descriptorAllocated = 0;
 }
 
-gfx::DescriptorTable gfx::DescriptorAllocator::allocateDescriptorTable(uint32_t descriptorNum) {
-    ASSERT(descriptorAllocated + descriptorNum <= MAX_DESCRIPTORS, "Can't allocate %u descriptors", descriptorNum);
+ni::DescriptorTable ni::DescriptorAllocator::allocateDescriptorTable(uint32_t descriptorNum) {
+    NI_ASSERT(descriptorAllocated + descriptorNum <= NI_MAX_DESCRIPTORS, "Can't allocate %u descriptors", descriptorNum);
     DescriptorTable table = { { gpuBaseHandle.ptr + descriptorAllocated * descriptorHandleSize }, { cpuBaseHandle.ptr + descriptorAllocated * descriptorHandleSize }, descriptorHandleSize, 0, descriptorNum };
     descriptorAllocated += descriptorNum;
     return table;
 }
 
-void gfx::init(uint32_t width, uint32_t height) {
+void ni::init(uint32_t width, uint32_t height) {
     memset(&renderer, 0, sizeof(renderer));
 	renderer.windowWidth = width;
 	renderer.windowHeight = height;
 
-    renderer.imagesToUpload = (Image2D**)malloc(MAX_DESCRIPTORS * sizeof(Image2D*));
+    renderer.imagesToUpload = (Texture**)malloc(NI_MAX_DESCRIPTORS * sizeof(Texture*));
     renderer.imageToUploadNum = 0;
 
     memset(keysDown, 0, sizeof(keysDown));
     memset(mouseBtnsDown, 0, sizeof(mouseBtnsDown));
 
-#if USE_FULLSCREEN
+#if NI_USE_FULLSCREEN
     renderer.windowWidth = GetSystemMetrics(SM_CXSCREEN);
     renderer.windowHeight = GetSystemMetrics(SM_CXSCREEN);
 #endif
@@ -200,7 +207,7 @@ void gfx::init(uint32_t width, uint32_t height) {
     RegisterClass(&windowClass);
 
     DWORD windowStyle = WS_VISIBLE | WS_SYSMENU | WS_CAPTION | WS_BORDER;
-#if USE_FULLSCREEN    
+#if NI_USE_FULLSCREEN    
     windowStyle = WS_POPUP | WS_VISIBLE;
 #endif
 
@@ -225,34 +232,34 @@ void gfx::init(uint32_t width, uint32_t height) {
 #else
     UINT factoryFlag = 0;
 #endif
-    D3D_ASSERT(CreateDXGIFactory2(factoryFlag, IID_PPV_ARGS(&renderer.factory)), "Failed to create factory");
-    D3D_ASSERT(renderer.factory->EnumAdapters(0, (IDXGIAdapter**)(&renderer.adapter)), "Failed to aquire adapter");
-    D3D_ASSERT(D3D12CreateDevice((IUnknown*)renderer.adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&renderer.device)), "Failed to create device");
+    NI_D3D_ASSERT(CreateDXGIFactory2(factoryFlag, IID_PPV_ARGS(&renderer.factory)), "Failed to create factory");
+    NI_D3D_ASSERT(renderer.factory->EnumAdapters(0, (IDXGIAdapter**)(&renderer.adapter)), "Failed to aquire adapter");
+    NI_D3D_ASSERT(D3D12CreateDevice((IUnknown*)renderer.adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&renderer.device)), "Failed to create device");
 
     D3D12_COMMAND_QUEUE_DESC commandQueueDesc{};
     commandQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     commandQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     commandQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     commandQueueDesc.NodeMask = 0;
-    D3D_ASSERT(renderer.device->CreateCommandQueue(&commandQueueDesc, IID_PPV_ARGS(&renderer.commandQueue)), "Failed to create command queue");
+    NI_D3D_ASSERT(renderer.device->CreateCommandQueue(&commandQueueDesc, IID_PPV_ARGS(&renderer.commandQueue)), "Failed to create command queue");
     renderer.commandQueue->SetName(L"gfx::graphicsCommandQueue");
 
-    for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
-        RenderFrame& frame = renderer.frames[index];
-        D3D_ASSERT(renderer.device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame.commandAllocator)), "Failed to create command allocator");
-        D3D_ASSERT(renderer.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame.commandAllocator, nullptr, IID_PPV_ARGS(&frame.commandList)), "Failed to create command list");
-        D3D_ASSERT(renderer.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.fence)), "Failed to create fence");
+    for (uint32_t index = 0; index < NI_FRAME_COUNT; ++index) {
+        FrameData& frame = renderer.frames[index];
+        NI_D3D_ASSERT(renderer.device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&frame.commandAllocator)), "Failed to create command allocator");
+        NI_D3D_ASSERT(renderer.device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, frame.commandAllocator, nullptr, IID_PPV_ARGS(&frame.commandList)), "Failed to create command list");
+        NI_D3D_ASSERT(renderer.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&frame.fence)), "Failed to create fence");
         frame.fenceEvent = CreateEvent(nullptr, false, false, nullptr);
-        D3D_ASSERT(frame.commandList->Close(), "Failed to close command list");
+        NI_D3D_ASSERT(frame.commandList->Close(), "Failed to close command list");
         frame.commandAllocator->SetName(L"gfx::frame::commandAllocator");
         frame.commandList->SetName(L"gfx::frame::commandList");
         frame.fence->SetName(L"gfx::frame::fence");
         D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc = {};
         descriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        descriptorHeapDesc.NumDescriptors = MAX_DESCRIPTORS;
+        descriptorHeapDesc.NumDescriptors = NI_MAX_DESCRIPTORS;
         descriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         descriptorHeapDesc.NodeMask = 0;
-        D3D_ASSERT(renderer.device->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&frame.descriptorAllocator.descriptorHeap)), "Failed to create descriptor heap");
+        NI_D3D_ASSERT(renderer.device->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&frame.descriptorAllocator.descriptorHeap)), "Failed to create descriptor heap");
         frame.descriptorAllocator.descriptorHandleSize = renderer.device->GetDescriptorHandleIncrementSize(descriptorHeapDesc.Type);
         frame.descriptorAllocator.descriptorAllocated = 0;
         frame.descriptorAllocator.gpuBaseHandle = frame.descriptorAllocator.descriptorHeap->GetGPUDescriptorHandleForHeapStart();
@@ -260,7 +267,7 @@ void gfx::init(uint32_t width, uint32_t height) {
         frame.frameIndex = index;
     }
 
-    D3D_ASSERT(renderer.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&renderer.presentFence)), "Failed to create fence");
+    NI_D3D_ASSERT(renderer.device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&renderer.presentFence)), "Failed to create fence");
     renderer.presentFenceEvent = CreateEvent(nullptr, false, false, nullptr);
     renderer.presentFenceValue = 0;
     renderer.presentFence->SetName(L"gfx::presentFence");
@@ -275,76 +282,80 @@ void gfx::init(uint32_t width, uint32_t height) {
             DXGI_MODE_SCALING_UNSPECIFIED},
         { 1, 0 },
         DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT,
-        BACKBUFFER_COUNT,
+        NI_BACKBUFFER_COUNT,
         renderer.windowHandle,
         true,
         DXGI_SWAP_EFFECT_FLIP_DISCARD,
         DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH 
     };
 
-    D3D_ASSERT(renderer.factory->CreateSwapChain((IUnknown*)renderer.commandQueue, &swapChainDesc, (IDXGISwapChain**)&renderer.swapChain), "Failed to create swapchain");
-    for (uint32_t index = 0; index < BACKBUFFER_COUNT; ++index) {
+    NI_D3D_ASSERT(renderer.factory->CreateSwapChain((IUnknown*)renderer.commandQueue, &swapChainDesc, (IDXGISwapChain**)&renderer.swapChain), "Failed to create swapchain");
+    for (uint32_t index = 0; index < NI_BACKBUFFER_COUNT; ++index) {
         renderer.swapChain->GetBuffer(index, IID_PPV_ARGS(&renderer.backbuffers[index]));
         renderer.backbuffers[index]->SetName(L"gfx::backbuffer");
     }
 
     D3D12_DESCRIPTOR_HEAP_DESC rtvDescriptorHeapDesc = {};
     rtvDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvDescriptorHeapDesc.NumDescriptors = BACKBUFFER_COUNT;
+    rtvDescriptorHeapDesc.NumDescriptors = NI_BACKBUFFER_COUNT;
     rtvDescriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     rtvDescriptorHeapDesc.NodeMask = 0;
-    D3D_ASSERT(renderer.device->CreateDescriptorHeap(&rtvDescriptorHeapDesc, IID_PPV_ARGS(&renderer.rtvDescriptorHeap)), "Failed to create RTV descriptor heap");
+    NI_D3D_ASSERT(renderer.device->CreateDescriptorHeap(&rtvDescriptorHeapDesc, IID_PPV_ARGS(&renderer.rtvDescriptorHeap)), "Failed to create RTV descriptor heap");
     renderer.rtvDescriptorHeap->SetName(L"gfx::rtvDescriptorHeap");
 
     D3D12_DESCRIPTOR_HEAP_DESC dsvDescriptorHeapDesc = {};
     dsvDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    dsvDescriptorHeapDesc.NumDescriptors = BACKBUFFER_COUNT;
+    dsvDescriptorHeapDesc.NumDescriptors = NI_BACKBUFFER_COUNT;
     dsvDescriptorHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     dsvDescriptorHeapDesc.NodeMask = 0;
-    D3D_ASSERT(renderer.device->CreateDescriptorHeap(&dsvDescriptorHeapDesc, IID_PPV_ARGS(&renderer.dsvDescriptorHeap)), "Failed to create DSV descriptor heap");
+    NI_D3D_ASSERT(renderer.device->CreateDescriptorHeap(&dsvDescriptorHeapDesc, IID_PPV_ARGS(&renderer.dsvDescriptorHeap)), "Failed to create DSV descriptor heap");
     renderer.dsvDescriptorHeap->SetName(L"gfx::dsvDescriptorHeap");
 }
-void gfx::waitForCurrentFrame() {
-    RenderFrame& frame = renderer.frames[renderer.currentFrame];
+void ni::setFrameUserData(uint32_t frame, void* data) {
+    NI_ASSERT(frame < NI_FRAME_COUNT, "Can't store user data on frame %u because it doesn't exist. The frame count is %u", frame, NI_FRAME_COUNT);
+    renderer.frames[frame].userData = data;
+}
+void ni::waitForCurrentFrame() {
+    FrameData& frame = renderer.frames[renderer.currentFrame];
     if (frame.fence->GetCompletedValue() != frame.frameWaitValue) {
         frame.fence->SetEventOnCompletion(frame.frameWaitValue, frame.fenceEvent);
         WaitForSingleObject(frame.fenceEvent, INFINITE);
     }
 }
-void gfx::waitForAllFrames() {
-    for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
-        RenderFrame& frame = renderer.frames[index];
+void ni::waitForAllFrames() {
+    for (uint32_t index = 0; index < NI_FRAME_COUNT; ++index) {
+        FrameData& frame = renderer.frames[index];
         if (frame.fence->GetCompletedValue() != frame.frameWaitValue) {
             frame.fence->SetEventOnCompletion(frame.frameWaitValue, frame.fenceEvent);
             WaitForSingleObject(frame.fenceEvent, INFINITE);
         }
     }
 }
-void gfx::destroy() {
+void ni::destroy() {
     waitForAllFrames();
-    for (uint32_t index = 0; index < FRAME_COUNT; ++index) {
-        RenderFrame& frame = renderer.frames[index];
-        D3D_RELEASE(frame.commandList);
-        D3D_RELEASE(frame.commandAllocator);
-        D3D_RELEASE(frame.fence);
+    for (uint32_t index = 0; index < NI_FRAME_COUNT; ++index) {
+        FrameData& frame = renderer.frames[index];
+        NI_D3D_RELEASE(frame.commandList);
+        NI_D3D_RELEASE(frame.commandAllocator);
+        NI_D3D_RELEASE(frame.fence);
         CloseHandle(frame.fenceEvent);
-        D3D_RELEASE(frame.descriptorAllocator.descriptorHeap);
+        NI_D3D_RELEASE(frame.descriptorAllocator.descriptorHeap);
     }
-    for (uint32_t index = 0; index < BACKBUFFER_COUNT; ++index) {
-        D3D_RELEASE(renderer.backbuffers[index]);
+    for (uint32_t index = 0; index < NI_BACKBUFFER_COUNT; ++index) {
+        NI_D3D_RELEASE(renderer.backbuffers[index]);
     }
     if (renderer.presentFence->GetCompletedValue() != renderer.presentFenceValue) {
         renderer.presentFence->SetEventOnCompletion(renderer.presentFenceValue, renderer.presentFenceEvent);
         WaitForSingleObject(renderer.presentFenceEvent, INFINITE);
     }
     CloseHandle(renderer.presentFenceEvent);
-    D3D_RELEASE(renderer.rtvDescriptorHeap);
-    D3D_RELEASE(renderer.presentFence);
-    D3D_RELEASE(renderer.swapChain);
-    D3D_RELEASE(renderer.commandQueue);
-    D3D_RELEASE(renderer.device);
-    D3D_RELEASE(renderer.adapter);
-    D3D_RELEASE(renderer.factory);
+    NI_D3D_RELEASE(renderer.rtvDescriptorHeap);
+    NI_D3D_RELEASE(renderer.presentFence);
+    NI_D3D_RELEASE(renderer.swapChain);
+    NI_D3D_RELEASE(renderer.commandQueue);
+    NI_D3D_RELEASE(renderer.device);
+    NI_D3D_RELEASE(renderer.adapter);
+    NI_D3D_RELEASE(renderer.factory);
     free(renderer.imagesToUpload);
 
 #if _DEBUG
@@ -363,7 +374,7 @@ void gfx::destroy() {
 
 }
 
-void gfx::pollEvents() {
+void ni::pollEvents() {
     MSG message;
     while (PeekMessageA(&message, nullptr, 0, 0, PM_REMOVE)) {
         switch (message.message) {
@@ -411,28 +422,33 @@ void gfx::pollEvents() {
     }
 }
 
-bool gfx::shouldQuit() {
+bool ni::shouldQuit() {
     return renderer.shouldQuit;
 }
 
-ID3D12Device* gfx::getDevice() {
+ni::FrameData& ni::getFrameData() {
+    FrameData& frame = renderer.frames[renderer.currentFrame];
+    return frame;
+}
+
+ID3D12Device* ni::getDevice() {
     return renderer.device;
 }
 
-gfx::RenderFrame& gfx::beginFrame() {
-    RenderFrame& frame = renderer.frames[renderer.currentFrame];
-    D3D_ASSERT(frame.commandAllocator->Reset(), "Failed to reset command allocator");
-    D3D_ASSERT(frame.commandList->Reset(frame.commandAllocator, nullptr), "Failed to reset command list");
+ni::FrameData& ni::beginFrame() {
+    FrameData& frame = renderer.frames[renderer.currentFrame];
+    NI_D3D_ASSERT(frame.commandAllocator->Reset(), "Failed to reset command allocator");
+    NI_D3D_ASSERT(frame.commandList->Reset(frame.commandAllocator, nullptr), "Failed to reset command list");
     frame.descriptorAllocator.reset();
     // Allocate all descriptors to allow for bindless resources.
-    frame.descriptorTable = frame.descriptorAllocator.allocateDescriptorTable(MAX_DESCRIPTORS);
+    frame.descriptorTable = frame.descriptorAllocator.allocateDescriptorTable(NI_MAX_DESCRIPTORS);
     frame.commandList->SetDescriptorHeaps(1, &frame.descriptorAllocator.descriptorHeap);
 
     // Upload texture data
     for (uint32_t index = 0; index < renderer.imageToUploadNum; ++index) {
-        Image2D* image = renderer.imagesToUpload[index];
-        ASSERT((image->state & GFX_IMAGE_STATE_CREATED) > 0, "Invalid image");
-        if ((image->state & GFX_IMAGE_STATE_UPLOADED) > 0) {
+        Texture* image = renderer.imagesToUpload[index];
+        NI_ASSERT((image->state & NI_IMAGE_STATE_CREATED) > 0, "Invalid image");
+        if ((image->state & NI_IMAGE_STATE_UPLOADED) > 0) {
             continue;
         }
 
@@ -446,7 +462,7 @@ gfx::RenderFrame& gfx::beginFrame() {
         renderer.device->GetCopyableFootprints(&desc, 0, 1, 0, &layout, &numRows, &rowSizeInBytes, &totalBytes);
         void* mapped = nullptr;
         uploadBuffer->Map(0, nullptr, &mapped);
-        size_t pixelSize = gfx::getDXGIFormatBytes(desc.Format);
+        size_t pixelSize = ni::getDXGIFormatBytes(desc.Format);
 
         for (uint32_t index = 0; index < numRows * layout.Footprint.Depth; ++index) {
             void* dstAddr = offsetPtr(mapped, (intptr_t)(index * layout.Footprint.RowPitch));
@@ -481,55 +497,55 @@ gfx::RenderFrame& gfx::beginFrame() {
 
         free((void*)image->cpuData);
         image->cpuData = nullptr;
-        image->state |= GFX_IMAGE_STATE_UPLOADED;
+        image->state |= NI_IMAGE_STATE_UPLOADED;
     }
     renderer.imageToUploadNum = 0;
 
     return frame;
 }
 
-void gfx::endFrame() {
-    RenderFrame& frame = renderer.frames[renderer.currentFrame];
-    D3D_ASSERT(frame.commandList->Close(), "Failed to close command list");
+void ni::endFrame() {
+    FrameData& frame = renderer.frames[renderer.currentFrame];
+    NI_D3D_ASSERT(frame.commandList->Close(), "Failed to close command list");
     ID3D12CommandList* commandLists[] = { frame.commandList };
     renderer.commandQueue->ExecuteCommandLists(1, commandLists);
-    D3D_ASSERT(renderer.commandQueue->Signal(frame.fence, ++frame.frameWaitValue), "Failed to signal frame fence");
-    renderer.currentFrame = (renderer.currentFrame + 1) % FRAME_COUNT;
+    NI_D3D_ASSERT(renderer.commandQueue->Signal(frame.fence, ++frame.frameWaitValue), "Failed to signal frame fence");
+    renderer.currentFrame = (renderer.currentFrame + 1) % NI_FRAME_COUNT;
 }
 
-ID3D12Resource* gfx::getCurrentBackbuffer() {
+ID3D12Resource* ni::getCurrentBackbuffer() {
     return renderer.backbuffers[renderer.presentFrame];
 }
 
-void gfx::present(bool vsync) {
+void ni::present(bool vsync) {
     if (renderer.presentFence->GetCompletedValue() != renderer.presentFenceValue) {
         renderer.presentFence->SetEventOnCompletion(renderer.presentFenceValue, renderer.presentFenceEvent);
         WaitForSingleObject(renderer.presentFenceEvent, INFINITE);
     }
 
-    D3D_ASSERT(renderer.swapChain->Present(vsync ? 1 : 0, 0), "Failed to present");
-    D3D_ASSERT(renderer.commandQueue->Signal(renderer.presentFence, ++renderer.presentFenceValue), "Failed to signal present fence");
-    renderer.presentFrame = renderer.presentFenceValue % BACKBUFFER_COUNT;
+    NI_D3D_ASSERT(renderer.swapChain->Present(vsync ? 1 : 0, 0), "Failed to present");
+    NI_D3D_ASSERT(renderer.commandQueue->Signal(renderer.presentFence, ++renderer.presentFenceValue), "Failed to signal present fence");
+    renderer.presentFrame = renderer.presentFenceValue % NI_BACKBUFFER_COUNT;
 }
 
-ID3D12PipelineState* gfx::createGraphicsPipelineState(const wchar_t* name, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc) {
+ID3D12PipelineState* ni::createGraphicsPipelineState(const wchar_t* name, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc) {
     ID3D12PipelineState* pso = nullptr;
-    D3D_ASSERT(renderer.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)), "Failed to create graphics pipeline state");
+    NI_D3D_ASSERT(renderer.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pso)), "Failed to create graphics pipeline state");
     pso->SetName(name);
     return pso;
 }
 
-ID3D12PipelineState* gfx::createComputePipelineState(const wchar_t* name, const D3D12_COMPUTE_PIPELINE_STATE_DESC& psoDesc) {
+ID3D12PipelineState* ni::createComputePipelineState(const wchar_t* name, const D3D12_COMPUTE_PIPELINE_STATE_DESC& psoDesc) {
     ID3D12PipelineState* pso = nullptr;
-    D3D_ASSERT(renderer.device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso)), "Failed to create compute pipeline state");
+    NI_D3D_ASSERT(renderer.device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso)), "Failed to create compute pipeline state");
     pso->SetName(name);
     return pso;
 }
 
-float gfx::getViewWidth() { return (float)renderer.windowWidth; }
-float gfx::getViewHeight() { return (float)renderer.windowHeight; }
+float ni::getViewWidth() { return (float)renderer.windowWidth; }
+float ni::getViewHeight() { return (float)renderer.windowHeight; }
 
-gfx::Resource gfx::createBuffer(const wchar_t* name, size_t bufferSize, BufferType type, bool initToZero) {
+ni::Resource ni::createBuffer(const wchar_t* name, size_t bufferSize, BufferType type, bool initToZero) {
     D3D12_HEAP_TYPE heapType;
     D3D12_RESOURCE_STATES initialState;
     D3D12_RESOURCE_FLAGS flags;
@@ -565,7 +581,7 @@ gfx::Resource gfx::createBuffer(const wchar_t* name, size_t bufferSize, BufferTy
         heapType = D3D12_HEAP_TYPE_DEFAULT;
         break;
     default:
-        PANIC("Error: Invalid buffer type"); // Invalid Buffer Type
+        NI_PANIC("Error: Invalid buffer type"); // Invalid Buffer Type
         break;
     }
 
@@ -594,7 +610,7 @@ gfx::Resource gfx::createBuffer(const wchar_t* name, size_t bufferSize, BufferTy
         heapFlags |= D3D12_HEAP_FLAG_CREATE_NOT_ZEROED;
     }
     ID3D12Resource* resource = nullptr;
-    D3D_ASSERT(renderer.device->CreateCommittedResource(
+    NI_D3D_ASSERT(renderer.device->CreateCommittedResource(
         &heapProps,
         heapFlags,
         &resourceDesc, initialState, nullptr,
@@ -604,51 +620,51 @@ gfx::Resource gfx::createBuffer(const wchar_t* name, size_t bufferSize, BufferTy
     return { resource, initialState };
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE gfx::getRenderTargetViewCPUHandle() {
+D3D12_CPU_DESCRIPTOR_HANDLE ni::getRenderTargetViewCPUHandle() {
     return renderer.rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE gfx::getRenderTargetViewGPUHandle() {
+D3D12_GPU_DESCRIPTOR_HANDLE ni::getRenderTargetViewGPUHandle() {
     return renderer.rtvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE gfx::getDepthStencilViewCPUHandle() {
+D3D12_CPU_DESCRIPTOR_HANDLE ni::getDepthStencilViewCPUHandle() {
     return renderer.dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 }
-D3D12_GPU_DESCRIPTOR_HANDLE gfx::getDepthStencilViewGPUHandle() {
+D3D12_GPU_DESCRIPTOR_HANDLE ni::getDepthStencilViewGPUHandle() {
     return renderer.dsvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
 }
 
-float gfx::mouseX() {
+float ni::mouseX() {
     return renderer.mouseX;
 }
-float gfx::mouseY() {
+float ni::mouseY() {
     return renderer.mouseY;
 }
 
-bool gfx::mouseDown(MouseButton button) {
+bool ni::mouseDown(MouseButton button) {
     return mouseBtnsDown[(uint32_t)button];
 }
 
-bool gfx::keyDown(KeyCode keyCode) {
+bool ni::keyDown(KeyCode keyCode) {
     return keysDown[(uint32_t)keyCode];
 }
 
-float gfx::randomFloat() {
+float ni::randomFloat() {
     static std::random_device randDevice;
     static std::mt19937 mtGen(randDevice());
     static std::uniform_real_distribution<float> udt;
     return udt(mtGen);
 }
 
-uint32_t gfx::randomUint() {
+uint32_t ni::randomUint() {
     static std::random_device randDevice;
     static std::mt19937 mtGen(randDevice());
     static std::uniform_int_distribution<unsigned int> udt;
     return udt(mtGen);
 }
 
-double gfx::getSeconds() {
+double ni::getSeconds() {
     double time = std::chrono::time_point_cast<std::chrono::duration<double>>(
         std::chrono::high_resolution_clock::now())
         .time_since_epoch()
@@ -656,7 +672,7 @@ double gfx::getSeconds() {
     return time;
 }
 
-size_t gfx::getDXGIFormatBits(DXGI_FORMAT format) {
+size_t ni::getDXGIFormatBits(DXGI_FORMAT format) {
     switch (format) {
     case DXGI_FORMAT_R32G32B32A32_TYPELESS:
     case DXGI_FORMAT_R32G32B32A32_FLOAT:
@@ -798,12 +814,13 @@ size_t gfx::getDXGIFormatBits(DXGI_FORMAT format) {
     }
 }
 
-size_t gfx::getDXGIFormatBytes(DXGI_FORMAT format) {
+size_t ni::getDXGIFormatBytes(DXGI_FORMAT format) {
     return getDXGIFormatBits(format) / 8;
 }
 
-gfx::Image2D* gfx::createImage2D(const wchar_t* name, uint32_t width, uint32_t height, const void* pixels, DXGI_FORMAT dxgiFormat, D3D12_RESOURCE_FLAGS flags) {
-    Image2D* image = new Image2D();
+ni::Texture* ni::createTexture(const wchar_t* name, uint32_t width, uint32_t height, uint32_t depth, const void* pixels, DXGI_FORMAT dxgiFormat, D3D12_RESOURCE_FLAGS flags) {
+    NI_ASSERT(depth == 1, "No 3D textures supported yet.");
+    Texture* texture = new Texture();
     D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     D3D12_RESOURCE_DIMENSION dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     D3D12_RESOURCE_DESC resourceDesc = {
@@ -811,7 +828,7 @@ gfx::Image2D* gfx::createImage2D(const wchar_t* name, uint32_t width, uint32_t h
         D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT,
         (uint64_t)width,
         height,
-        1,
+        (uint16_t)depth,
         1,
         dxgiFormat,
         { 1,  0},
@@ -828,36 +845,180 @@ gfx::Image2D* gfx::createImage2D(const wchar_t* name, uint32_t width, uint32_t h
 
     D3D12_CLEAR_VALUE* clearValuePtr = nullptr;
     D3D12_CLEAR_VALUE clearValue = {};
-    if (flags == D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) {
+
+    if ((flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) > 0) {
         clearValue.Format = dxgiFormat;
         clearValue.DepthStencil.Depth = 1;
         clearValue.DepthStencil.Stencil = 0;
         clearValuePtr = &clearValue;
+    } 
+    
+    if ((flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) > 0) {
+        clearValue.Color[0] = 0.0f;
+        clearValue.Color[1] = 0.0f;
+        clearValue.Color[2] = 0.0f;
+        clearValue.Color[3] = 1.0f;
+        clearValuePtr = &clearValue;
     }
 
-    D3D_ASSERT(gfx::getDevice()->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &resourceDesc, initialState, clearValuePtr, IID_PPV_ARGS(&image->texture.resource)), "Failed to create image resource");
-    image->texture.resource->SetName(name);
-    image->texture.state = initialState;
-    image->width = (float)width;
-    image->height = (float)height;
-    image->state |= GFX_IMAGE_STATE_CREATED;
+    NI_D3D_ASSERT(ni::getDevice()->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES, &resourceDesc, initialState, clearValuePtr, IID_PPV_ARGS(&texture->texture.resource)), "Failed to create image resource");
+    texture->texture.resource->SetName(name);
+    texture->texture.state = initialState;
+    texture->width = width;
+    texture->height = height;
+    texture->depth = depth;
+    texture->state |= NI_IMAGE_STATE_CREATED;
 
     if (pixels != nullptr) {
-        size_t pixelSize = gfx::getDXGIFormatBytes(dxgiFormat);
+        size_t pixelSize = ni::getDXGIFormatBytes(dxgiFormat);
         uint64_t alignedWidth = alignSize(width, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
         uint64_t dataSize = alignedWidth * height * pixelSize;
         uint64_t bufferSize = dataSize < 256 ? 256 : dataSize;
-        image->upload = gfx::createBuffer(L"SpriteImage::upload", bufferSize, gfx::UPLOAD_BUFFER, false);
-        image->cpuData = malloc(pixelSize * width * height);
-        memcpy((void*)image->cpuData, pixels, pixelSize * width * height);
-        renderer.imagesToUpload[renderer.imageToUploadNum++] = image;
+        texture->upload = ni::createBuffer(L"SpriteImage::upload", bufferSize, ni::UPLOAD_BUFFER, false);
+        texture->cpuData = malloc(pixelSize * width * height);
+        NI_ASSERT(texture->cpuData != nullptr, "Failed to allocate cpu data for uploading to texture memory");
+        if (texture->cpuData != nullptr) {
+            memcpy((void*)texture->cpuData, pixels, pixelSize * width * height);
+        }
+        renderer.imagesToUpload[renderer.imageToUploadNum++] = texture;
     }
-    return image;
+    return texture;
 }
 
-void gfx::destroyImage2D(Image2D*& image) {
-    D3D_RELEASE(image->texture.resource);
-    D3D_RELEASE(image->upload.resource);
-    delete image;
-    image = nullptr;
+void ni::destroyTexture(Texture*& texture) {
+    NI_D3D_RELEASE(texture->texture.resource);
+    NI_D3D_RELEASE(texture->upload.resource);
+    delete texture;
+    texture = nullptr;
+}
+
+void ni::logFmt(const char* fmt, ...) {
+    static char bufferLarge[NI_UTILS_WINDOWS_LOG_MAX_BUFFER_SIZE * NI_UTILS_WINDOWS_LOG_MAX_BUFFER_COUNT] = {};
+    static uint32_t bufferIndex = 0;
+    va_list args;
+    va_start(args, fmt);
+    char* buffer = &bufferLarge[bufferIndex * NI_UTILS_WINDOWS_LOG_MAX_BUFFER_SIZE];
+    vsprintf_s(buffer, NI_UTILS_WINDOWS_LOG_MAX_BUFFER_SIZE, fmt, args);
+    bufferIndex = (bufferIndex + 1) % NI_UTILS_WINDOWS_LOG_MAX_BUFFER_COUNT;
+    va_end(args);
+    OutputDebugStringA(buffer);
+    printf("%s", buffer);
+}
+
+// Origin: https://github.com/niklas-ourmachinery/bitsquid-foundation/blob/master/murmur_hash.cpp
+uint64_t ni::murmurHash(const void* key, uint64_t keyLength, uint64_t seed) {
+    const uint64_t m = 0xc6a4a7935bd1e995ULL;
+    const uint32_t r = 47;
+    uint64_t h = seed ^ (keyLength * m);
+    const uint64_t* data = (const uint64_t*)key;
+    const uint64_t* end = data + (keyLength / 8);
+    while (data != end) {
+        uint64_t k = *data++;
+        k *= m;
+        k ^= k >> r;
+        k *= m;
+        h ^= k;
+        h *= m;
+    }
+    const unsigned char* data2 = (const unsigned char*)data;
+    switch (keyLength & 7) {
+    case 7: h ^= uint64_t(data2[6]) << 48;
+    case 6: h ^= uint64_t(data2[5]) << 40;
+    case 5: h ^= uint64_t(data2[4]) << 32;
+    case 4: h ^= uint64_t(data2[3]) << 24;
+    case 3: h ^= uint64_t(data2[2]) << 16;
+    case 2: h ^= uint64_t(data2[1]) << 8;
+    case 1: h ^= uint64_t(data2[0]);
+        h *= m;
+    };
+    h ^= h >> r;
+    h *= m;
+    h ^= h >> r;
+    return h;
+}
+
+size_t ni::getFileSize(const char* path) {
+    HANDLE fileHandle = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (fileHandle != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER fileSize = {};
+        if (GetFileSizeEx(fileHandle, &fileSize)) {
+            return fileSize.QuadPart;
+        }
+        CloseHandle(fileHandle);
+    }
+    return 0;
+}
+
+bool ni::readFile(const char* path, void* outBuffer) {
+    HANDLE fileHandle = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (fileHandle != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER fileSize = {};
+        GetFileSizeEx(fileHandle, &fileSize);
+        DWORD readBytes = 0;
+        if (!ReadFile(fileHandle, outBuffer, (DWORD)fileSize.QuadPart, &readBytes, nullptr)) {
+            CloseHandle(fileHandle);
+            return false;
+        }
+        CloseHandle(fileHandle);
+        return true;
+    }
+    return false;
+}
+
+void* ni::allocReadFile(const char* path) {
+    HANDLE fileHandle = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (fileHandle != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER fileSize = {};
+        GetFileSizeEx(fileHandle, &fileSize);
+        void* buffer = malloc(fileSize.QuadPart);
+        DWORD readBytes = 0;
+        if (!ReadFile(fileHandle, buffer, (DWORD)fileSize.QuadPart, &readBytes, nullptr)) {
+            CloseHandle(fileHandle);
+            free(buffer);
+            return nullptr;
+        }
+        CloseHandle(fileHandle);
+        return buffer;
+    }
+    return nullptr;
+}
+
+ni::FileReader::FileReader(const char* path) {
+    size = getFileSize(path);
+    buffer = allocReadFile(path);
+}
+
+ni::FileReader::~FileReader() {
+    free(buffer);
+}
+
+void* ni::FileReader::operator*() const {
+    return buffer;
+}
+
+size_t ni::FileReader::getSize() const {
+    return size;
+}
+
+void ni::DescriptorTable::reset() {
+    allocated = 0;
+}
+
+ni::DescriptorHandle ni::DescriptorTable::allocate() {
+    NI_ASSERT(allocated + 1 <= capacity, "Exceeded capacity of descriptors allocated");
+    DescriptorHandle handle = { gpuHandle(allocated), cpuHandle(allocated) };
+    allocated += 1;
+    return handle;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE ni::DescriptorTable::gpuHandle(uint64_t index) {
+    D3D12_GPU_DESCRIPTOR_HANDLE handle = gpuBaseHandle;
+    handle.ptr += (index * handleSize);
+    return handle;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE ni::DescriptorTable::cpuHandle(uint64_t index) {
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = cpuBaseHandle;
+    handle.ptr += (index * handleSize);
+    return handle;
 }

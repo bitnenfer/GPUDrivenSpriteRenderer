@@ -18,10 +18,7 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="gfx.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="utils.cpp">
+    <ClCompile Include="ni.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="sprite_renderer.cpp">
@@ -29,10 +26,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gfx.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="utils.h">
+    <ClInclude Include="ni.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="images.h">

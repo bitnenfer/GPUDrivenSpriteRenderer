@@ -1,7 +1,6 @@
 #pragma once
 
-#include "gfx.h"
-#include "utils.h"
+#include "ni.h"
 #include "matrix.h"
 
 // We can have 1 texture per draw.
@@ -11,8 +10,7 @@
 #define TEXTURE_ID_OFFSET 5
 
 #define OP_CULL_SPRITES 0
-#define OP_UPDATE_COMMANDS 1
-#define OP_GENERATE_SPRITES 2
+#define OP_GENERATE_SPRITES 1
 
 #if _DEBUG
 #define OUTPUT_PATH "x64/Debug/"
@@ -20,17 +18,7 @@
 #define OUTPUT_PATH "x64/Release/"
 #endif
 
-#define NK_COLOR_UINT(color)                                                   \
-    (((color) & 0xff) << 24) | ((((color) >> 8) & 0xff) << 16) |               \
-        ((((color) >> 16) & 0xff) << 8) | ((color) >> 24)
-#define NK_COLOR_RGBA_UINT(r, g, b, a)                                         \
-    ((uint32_t)(r)) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) |           \
-        ((uint32_t)(a) << 24)
-#define NK_COLOR_RGB_UINT(r, g, b) NK_COLOR_RGBA_UINT(r, g, b, 0xff)
-#define NK_COLOR_RGBA_FLOAT(r, g, b, a)                                        \
-    NK_COLOR_RGBA_UINT((uint8_t)((r) * 255.0f), (uint8_t)((g) * 255.0f),       \
-                       (uint8_t)((b) * 255.0f), (uint8_t)((a) * 255.0f))
-#define NK_COLOR_RGB_FLOAT(r, g, b) NK_COLOR_RGBA_FLOAT(r, g, b, 1.0f)
+
 
 struct SpriteVertex {
     float position[2];
@@ -79,19 +67,19 @@ struct SpriteRenderer {
     inline void rotate(float rad) { matrixStack.rotate(rad); }
     inline void scale(float x, float y) { matrixStack.scale(x, y); }
     void reset();
-    void drawImage(float x, float y, float width, float height, uint32_t color, gfx::Image2D* image);
-    void flushCommands(gfx::RenderFrame& frame);
+    void drawImage(float x, float y, float width, float height, uint32_t color, ni::Texture* image);
+    void flushCommands(ni::FrameData& frame);
 
 private:
-    gfx::Resource gpuDrawCommands[FRAME_COUNT];
-    gfx::Resource gpuUploadBuffer;
-    gfx::Resource gpuSpriteVertices;
-    gfx::Resource gpuSpriteVerticesCounter;
-    gfx::Resource gpuVisibleList;
-    gfx::Resource gpuPerLaneOffset;
-    gfx::Resource gpuCounterZero;
-    gfx::Resource gpuIndirectCommandBuffer;
-    gfx::Resource gpuClearIndirectCommandBuffer;
+    ni::Resource gpuDrawCommands[NI_FRAME_COUNT];
+    ni::Resource gpuUploadBuffer;
+    ni::Resource gpuSpriteVertices;
+    ni::Resource gpuSpriteVerticesCounter;
+    ni::Resource gpuVisibleList;
+    ni::Resource gpuPerLaneOffset;
+    ni::Resource gpuCounterZero;
+    ni::Resource gpuIndirectCommandBuffer;
+    ni::Resource gpuClearIndirectCommandBuffer;
     ID3D12CommandSignature* gpuDrawCommandSignature;
     ID3D12RootSignature* gpuSpriteGenRootSignature;
     ID3D12PipelineState* gpuSpriteGenPSO;
@@ -100,6 +88,6 @@ private:
     TransformStack matrixStack;
     DrawCommand* drawCommands;
     uint32_t drawCommandNum;
-    gfx::Image2D** images;
+    ni::Texture** images;
     uint32_t imageNum;
 };

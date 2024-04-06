@@ -1,3 +1,4 @@
+const float2 resolution : register(b0);
 
 struct SpriteVertex {
 	float2 position : POSITION0;
@@ -14,7 +15,8 @@ struct PixelVertex {
 
 PixelVertex main(SpriteVertex vtx) {
 	PixelVertex vtxOut;
-	vtxOut.position = float4(vtx.position, 0, 1);
+	vtxOut.position = float4((vtx.position * resolution) * 2.0 - 1, 0, 1);
+	vtxOut.position.y = -vtxOut.position.y;
 	vtxOut.texCoord = vtx.texCoord;
 	vtxOut.color = vtx.color;
 	vtxOut.textureId = vtx.textureId;

@@ -80,17 +80,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="gfx.cpp" />
+    <ClCompile Include="ni.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="sprite_renderer.cpp" />
-    <ClCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gfx.h" />
+    <ClInclude Include="ni.h" />
     <ClInclude Include="images.h" />
     <ClInclude Include="matrix.h" />
     <ClInclude Include="sprite_renderer.h" />
-    <ClInclude Include="utils.h" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="SpriteGen_CS.hlsl">

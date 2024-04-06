@@ -1,45 +1,40 @@
 #pragma once
 
-#include "utils.h"
 #include <stdint.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
-#include <unordered_map>
-#include <vector>
 
 ///////////////////////////////////////////////////////////////
 // CONFIG 
 ///////////////////////////////////////////////////////////////
 
-#define USE_FULLSCREEN 0
-#define FRAME_COUNT 3
-#define BACKBUFFER_COUNT 2
-#define MAX_DESCRIPTORS (1<<12)
+#define NI_USE_FULLSCREEN 0
+#define NI_FRAME_COUNT 3
+#define NI_BACKBUFFER_COUNT 2
+#define NI_MAX_DESCRIPTORS (1<<12)
 
 ///////////////////////////////////////////////////////////////
 
-#define D3D_PANIC(fmt, ...)                                                    \
-    LOG(fmt, __VA_ARGS__);                                                  \
-    __debugbreak();                                                            \
-    ExitProcess(-1);
-#define D3D_ASSERT(x, ...)                                                     \
-    if ((x) != S_OK) {                                                         \
-        D3D_PANIC(__VA_ARGS__);                                                \
-    }
-#define D3D_RELEASE(obj)                                                       \
-    {                                                                          \
-        if ((obj)) {                                                           \
-            (obj)->Release();                                                  \
-            obj = nullptr;                                                     \
-        }                                                                      \
-    }
+#define NI_EXIT(code) { ExitProcess(code); }
+#define NI_DEBUG_BREAK() __debugbreak()
+#define NI_LOG(fmt, ...) ni::logFmt(fmt "\n", ##__VA_ARGS__)
+#define NI_PANIC(fmt, ...) { ni::logFmt("PANIC: " fmt "\n", ##__VA_ARGS__); NI_DEBUG_BREAK(); NI_EXIT(~0); }
+#define NI_ASSERT(x, fmt, ...) if (!(x)) { ni::logFmt("ASSERT: " fmt "\n", ##__VA_ARGS__); NI_DEBUG_BREAK(); }
+#define NI_D3D_ASSERT(x, ...) if ((x) != S_OK) { NI_PANIC(__VA_ARGS__); }
+#define NI_D3D_RELEASE(obj) { if ((obj)) { (obj)->Release(); obj = nullptr; } }
+#define NI_COLOR_UINT(color) (((color) & 0xff) << 24) | ((((color) >> 8) & 0xff) << 16) | ((((color) >> 16) & 0xff) << 8) | ((color) >> 24)
+#define NI_COLOR_RGBA_UINT(r, g, b, a) ((uint32_t)(r)) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24)
+#define NI_COLOR_RGB_UINT(r, g, b) NI_COLOR_RGBA_UINT(r, g, b, 0xff)
+#define NI_COLOR_RGBA_FLOAT(r, g, b, a) NI_COLOR_RGBA_UINT((uint8_t)((r) * 255.0f), (uint8_t)((g) * 255.0f), (uint8_t)((b) * 255.0f), (uint8_t)((a) * 255.0f))
+#define NI_COLOR_RGB_FLOAT(r, g, b) NI_COLOR_RGBA_FLOAT(r, g, b, 1.0f)
+#define NI_IMAGE_STATE_NONE (0b000)
+#define NI_IMAGE_STATE_CREATED (0b001)
+#define NI_IMAGE_STATE_UPLOADED (0b010)
+#define NI_IMAGE_STATE_BOUND (0b100)
 
-#define GFX_IMAGE_STATE_NONE		(0b000)
-#define GFX_IMAGE_STATE_CREATED		(0b001)
-#define GFX_IMAGE_STATE_UPLOADED	(0b010)
-#define GFX_IMAGE_STATE_BOUND		(0b100)
+namespace ni {
 
-namespace gfx {
+	void logFmt(const char* fmt, ...);
 
 	enum KeyCode : uint32_t {
 		ALT = 18,
@@ -154,16 +149,72 @@ namespace gfx {
 		SHADER_RESOURCE_BUFFER
 	};
 
+	struct FileReader {
+		FileReader(const char* path);
+		~FileReader();
+		void* operator*() const;
+		size_t getSize() const;
+	private:
+		void* buffer = nullptr;
+		size_t size = 0;
+	};
+
+	template<typename T, typename TSize = uint64_t>
+	struct Array {
+		Array() : data(nullptr), num(0), capacity(0) {}
+
+		void reset() {
+			num = 0;
+		}
+
+		void add(const T& element) {
+			checkResize();
+			data[num++] = element;
+		}
+
+		void remove(TSize index) {
+			NI_ASSERT(index < num, "Index out of bounds");
+			for (TSize start = index; start < num - 1; ++start) {
+				data[start] = data[start + 1];
+			}
+			num--;
+		}
+
+		void resize(TSize newCapacity) {
+			T* newData = (T*)realloc(data, newCapacity * sizeof(T));
+			NI_ASSERT(newData != nullptr, "Failed to reallocate array");
+			data = newData;
+			capacity = newCapacity;
+		}
+
+		void checkResize() {
+			if (num + 1 >= capacity) {
+				resize(capacity > 0 ? capacity * 2 : 16);
+			}
+		}
+
+		T* getData() { return data; }
+		const T* getData() const { return data; }
+
+		TSize getNum() const { return num; }
+		TSize getCapacity() const { return capacity;  }
+
+	private:
+		T* data;
+		TSize num;
+		TSize capacity;
+	};
+
 	struct RootSignatureDescriptorRange {
 		RootSignatureDescriptorRange() {}
 		~RootSignatureDescriptorRange() {}
 
 		RootSignatureDescriptorRange& addRange(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t descriptorNum, uint32_t baseShaderRegister, uint32_t registerSpace);
-		const D3D12_DESCRIPTOR_RANGE* operator*() const { return ranges.data(); }
-		uint32_t getNum() const { return (uint32_t)ranges.size(); }
+		const D3D12_DESCRIPTOR_RANGE* operator*() const { return ranges.getData(); }
+		uint32_t getNum() const { return ranges.getNum(); }
 
 	private:
-		std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
+		Array<D3D12_DESCRIPTOR_RANGE, uint32_t> ranges;
 	};
 
 	struct RootSignatureBuilder {
@@ -177,8 +228,8 @@ namespace gfx {
 		ID3D12RootSignature* build(bool isCompute);
 
 	private:
-		std::vector<D3D12_ROOT_PARAMETER> rootParameters;
-		std::vector<D3D12_STATIC_SAMPLER_DESC> staticSamplers;
+		Array<D3D12_ROOT_PARAMETER, uint32_t> rootParameters;
+		Array<D3D12_STATIC_SAMPLER_DESC, uint32_t> staticSamplers;
 	};
 	
 	struct Resource {
@@ -196,6 +247,7 @@ namespace gfx {
 		};
 
 		ResourceBarrierBatcher() {
+			memset(barriers, 0, sizeof(barriers));
 			barrierNum = 0;
 		}
 
@@ -243,30 +295,10 @@ namespace gfx {
 	};
 
 	struct DescriptorTable {
-
-		inline void reset() {
-			allocated = 0;
-		}
-
-		inline DescriptorHandle allocate() {
-			ASSERT(allocated + 1 <= capacity, "Exceeded capacity of descriptors allocated");
-			DescriptorHandle handle = { gpuHandle(allocated), cpuHandle(allocated) };
-			allocated += 1;
-			return handle;
-		}
-
-		inline D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle(uint64_t index) {
-			D3D12_GPU_DESCRIPTOR_HANDLE handle = gpuBaseHandle;
-			handle.ptr += (index * handleSize);
-			return handle;
-		}
-
-		inline D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle(uint64_t index) {
-			D3D12_CPU_DESCRIPTOR_HANDLE handle = cpuBaseHandle;
-			handle.ptr += (index * handleSize);
-			return handle;
-		}
-
+		void reset();
+		DescriptorHandle allocate();
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle(uint64_t index);
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle(uint64_t index);
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuBaseHandle;
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuBaseHandle;
 		uint32_t handleSize;
@@ -286,7 +318,7 @@ namespace gfx {
 		uint32_t descriptorAllocated;
 	};
 
-	struct RenderFrame {
+	struct FrameData {
 		DescriptorTable descriptorTable;
 		DescriptorAllocator descriptorAllocator;
 		ID3D12GraphicsCommandList* commandList;
@@ -294,14 +326,16 @@ namespace gfx {
 		ID3D12Fence* fence;
 		HANDLE fenceEvent;
 		uint64_t frameWaitValue;
-		uint32_t frameIndex;
+		uint64_t frameIndex;
+		void* userData;
 	};
 
-	struct Image2D {
-		gfx::Resource texture;
-		gfx::Resource upload;
-		float width;
-		float height;
+	struct Texture {
+		ni::Resource texture;
+		ni::Resource upload;
+		uint32_t width;
+		uint32_t height;
+		uint32_t depth;
 		const void* cpuData;
 		uint32_t textureId;
 		uint32_t state;
@@ -316,8 +350,8 @@ namespace gfx {
 		IDXGISwapChain1* swapChain;
 		ID3D12DescriptorHeap* rtvDescriptorHeap;
 		ID3D12DescriptorHeap* dsvDescriptorHeap;
-		RenderFrame frames[FRAME_COUNT];
-		ID3D12Resource* backbuffers[FRAME_COUNT];
+		FrameData frames[NI_FRAME_COUNT];
+		ID3D12Resource* backbuffers[NI_FRAME_COUNT];
 		ID3D12Fence* presentFence;
 		HANDLE presentFenceEvent;
 		HWND windowHandle;
@@ -325,8 +359,8 @@ namespace gfx {
 		uint32_t windowHeight;
 		uint64_t presentFenceValue;
 		uint64_t presentFrame;
-		uint32_t currentFrame;
-		Image2D** imagesToUpload;
+		uint64_t currentFrame;
+		Texture** imagesToUpload;
 		uint32_t imageToUploadNum;
 		float mouseX;
 		float mouseY;
@@ -334,13 +368,15 @@ namespace gfx {
 	};
 
 	void init(uint32_t width, uint32_t height);
+	void setFrameUserData(uint32_t frame, void* data);
 	void waitForCurrentFrame();
 	void waitForAllFrames();
 	void destroy();
 	void pollEvents();
 	bool shouldQuit();
+	ni::FrameData& getFrameData();
 	ID3D12Device* getDevice();
-	gfx::RenderFrame& beginFrame();
+	ni::FrameData& beginFrame();
 	void endFrame();
 	ID3D12Resource* getCurrentBackbuffer();
 	void present(bool vsync = true);
@@ -362,6 +398,13 @@ namespace gfx {
 	double getSeconds();
 	size_t getDXGIFormatBits(DXGI_FORMAT format);
 	size_t getDXGIFormatBytes(DXGI_FORMAT format);
-	Image2D* createImage2D(const wchar_t* name, uint32_t width, uint32_t height, const void* pixels, DXGI_FORMAT dxgiFormat = DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
-	void destroyImage2D(Image2D*& image);
+	Texture* createTexture(const wchar_t* name, uint32_t width, uint32_t height, uint32_t depth, const void* pixels, DXGI_FORMAT dxgiFormat = DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
+	void destroyTexture(Texture*& image);
+	uint64_t murmurHash(const void* key, uint64_t keyLength, uint64_t seed);
+	inline void* offsetPtr(void* Ptr, intptr_t Offset) { return (void*)((intptr_t)Ptr + Offset); }
+	inline void* alignPtr(void* Ptr, size_t Alignment) { return (void*)(((uintptr_t)(Ptr)+((uintptr_t)(Alignment)-1LL)) & ~((uintptr_t)(Alignment)-1LL)); }
+	inline size_t alignSize(size_t Value, size_t Alignment) { return ((Value)+((Alignment)-1LL)) & ~((Alignment)-1LL); }
+	size_t getFileSize(const char* path);
+	bool readFile(const char* path, void* outBuffer);
+	void* allocReadFile(const char* path);
 }
